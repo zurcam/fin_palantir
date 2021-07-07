@@ -19,29 +19,32 @@ class Stock:
     """
     Returns a dataframe of a stock/data-set retrieved using pandas_datareader.
 
-    Parameters
-    ----------
-    alias: string
+    :param alias
+        str \n
         Stock Alias. Used to alias data-set by, forced to uppercase on initialization
         (e.g. 'WALMART' or 'INFECT').
-    ticker: string
+
+    :param ticker
+        str \n
         Stock/data-set ticker. The recognized official ticker for a stock/data-set
         (e.g. 'WMT', 'INFECTDISEMVTRACKD').
-    start_date: string, date, datetime, Timestamp
+    :param start_date
+        str, date, datetime, Timestamp \n
         Start date. If string, will attempt to parse into datetime object
         (e.g. datetime(2000, 1, 1), '1/1/2000', '2020-01-01').
-    end_date: string, date, datetime, Timestamp, default date.today()
+    :param end_date
+        str, date, datetime, Timestamp, default date.today() \n
         End date. If string, will attempt to parse into datetime object. Defaults to the current date of user system.
         (e.g. datetime(2000, 1, 1), '1/1/2000', '2020-01-01').
-    data_source: string, pandas_reader data_source/api call, default None
+    :param data_source
+        str, pandas_reader data_source/api call, default None \n
         The data_source for the stock/data-set. Can be an accepted pandas_datareader API call,
         or an acceptepted pandas_datareader data_source string. If none specificed, or if data_source fails, defaults
         to 'stooq' dailyreader
         (e.g. 'yahoo', 'fred')
-    use_stooq_reader: bool, default False
+    :param use_stooq_reader
+        bool, default False \n
         Boolean to force to use of StooqDailyReader if no data_source specified.
-
-
     """
 
     def __init__(self, alias, ticker, start_date, *, end_date=date.today(), data_source=None, use_stooq_reader=False):
@@ -167,7 +170,7 @@ class Stock:
 
     @data_source.setter
     def data_source(self, data_source):
-
+        """Setter that checks that data_source is callable in pandas_datareader."""
         self._data_source = str(data_source).lower()
         if self.use_stooq_reader:
             if (data_source is not None) and (data_source != 'stooq'):
@@ -185,6 +188,7 @@ class Stock:
 
     @start_date.setter
     def start_date(self, start_date):
+        """Setter that calls checker to ensure start_date can be converted to date."""
         self._start_date = self.check_date(start_date, 'start_date')
         self.try_check_date_interval()
 
@@ -194,6 +198,7 @@ class Stock:
 
     @end_date.setter
     def end_date(self, end_date):
+        """Setter that calls checker to ensure end_date can be converted to date."""
         self._end_date = self.check_date(end_date, 'end_date')
         self.try_check_date_interval()
 
@@ -210,7 +215,16 @@ class Stock:
     def __hash__(self):
         return (hash(repr(self)))
 
+    @property
     def dataframe(self):
+        """
+        Provides back a pandas_reader dataframe.
+        Dataframe is sorted on datetime index, and only includes columns (features) specified by user.
+        Upon init, features are all columns associated for the dataframe, but user may remove undesired features.
+        (e.g. stock_dataframe = Stock('walmart', 'wmt', '1/1/2000', data_source='yahoo).dataframe())
+
+        :returns dataframe
+        """
         if self.use_stooq_reader:
             df_stock = web.stooq.StooqDailyReader(self.ticker, self.start_date, self.end_date).read()
         else:
@@ -219,6 +233,14 @@ class Stock:
         return df_stock.sort_index()
 
     def remove_features(self, feature_list):
+        """
+        Function that allows user to remove features from a stock, if undesirable
+
+        :param feature_list
+            str, list \n
+            A single string, or list of string features to be removed.
+            (e.g. Stock.remove_features('Close'), Stock.remove_features(['Close', 'Open'])
+        """
         # if item isn't a list, make it a list :)
         if not isinstance(feature_list, (list, tuple)):
             feature_list = [feature_list]
@@ -228,6 +250,7 @@ class Stock:
         feature_list = [str(item) for item in feature_list]
         # check that each element in feature_list is in current self.features (don't remove anything yet)
         for feature in feature_list:
+            # if the feature is not in self.features (and can't be removed) raise exception
             if feature not in self.features:
                 raise Exception(f"Feature '{feature}' not in self.features, cannot be removed.")
         # if the number of requested feature to be removed is equal to total, raise exception
@@ -238,6 +261,17 @@ class Stock:
             self.features.remove(feature)
 
     def update_date(self, date_type, new_date):
+        """
+        Function that allows for alternative change to start/end date.
+
+        :param date_type
+            str 'start' or 'end' \n
+            Specifies which date attribute to change.
+
+        :param new_date
+            str, date, datetime, Timestamp \n
+            Date attribute will be updated to.
+        """
         # verify date_type argument, must be either 'start' or 'end'
         date_type = str(date_type).lower()
         if date_type not in ['start', 'end']:
@@ -255,6 +289,7 @@ class StockCollection:
     '''
     # TODO add documentation for class/functions
     # TODO for target stock column, change from values to an additional column predicting rate of change
+    # TODO allow, on init, the selection of complete removal of additional diviniations
     def __init__(self, target):
 
         self.target = target
@@ -331,7 +366,7 @@ class StockCollection:
     def set_divinations_dataframes(self, *, set_target_only=False, feature_date_cyclical=True, feature_holiday=True,
                                    holiday_set=holidays.US()):
         # get just target dataframe
-        target_dataframe = self.target[0].dataframe()
+        target_dataframe = self.target[0].dataframe
         # add cyclical date features if requested, and holiday feature if requested
         target_dataframe = self.dataframe_date_featuring(target_dataframe, feature_date_cyclical, feature_holiday,
                                                          holiday_set)
@@ -346,7 +381,7 @@ class StockCollection:
         if not set_target_only:
             # merge target predicting columns, and other divination features on index
             for divination in self.divinations:
-                divination_dataframe = pd.merge(divination_dataframe, divination.dataframe(), how='left',
+                divination_dataframe = pd.merge(divination_dataframe, divination.dataframe, how='left',
                                                 left_index=True, right_index=True)
             self.target_dataframe, self.divination_dataframe = target_dataframe.fillna(-1), divination_dataframe.fillna(
                 -1)
