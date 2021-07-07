@@ -16,9 +16,33 @@ device = torch.device('cpu')
 
 
 class Stock:
-    '''
-    class that defines a single stock
-    '''
+    """
+    Returns a dataframe of a stock/data-set retrieved using pandas_datareader.
+
+    Parameters
+    ----------
+    alias: string
+        Stock Alias. Used to alias data-set by, forced to uppercase on initialization
+        (e.g. 'WALMART' or 'INFECT').
+    ticker: string
+        Stock/data-set ticker. The recognized official ticker for a stock/data-set
+        (e.g. 'WMT', 'INFECTDISEMVTRACKD').
+    start_date: string, date, datetime, Timestamp
+        Start date. If string, will attempt to parse into datetime object
+        (e.g. datetime(2000, 1, 1), '1/1/2000', '2020-01-01').
+    end_date: string, date, datetime, Timestamp, default date.today()
+        End date. If string, will attempt to parse into datetime object. Defaults to the current date of user system.
+        (e.g. datetime(2000, 1, 1), '1/1/2000', '2020-01-01').
+    data_source: string, pandas_reader data_source/api call, default None
+        The data_source for the stock/data-set. Can be an accepted pandas_datareader API call,
+        or an acceptepted pandas_datareader data_source string. If none specificed, or if data_source fails, defaults
+        to 'stooq' dailyreader
+        (e.g. 'yahoo', 'fred')
+    use_stooq_reader: bool, default False
+        Boolean to force to use of StooqDailyReader if no data_source specified.
+
+
+    """
 
     def __init__(self, alias, ticker, start_date, *, end_date=date.today(), data_source=None, use_stooq_reader=False):
         # get use_stooq_reader
@@ -40,6 +64,9 @@ class Stock:
             raise Exception(f'Dataset for (ticker={self.ticker}, data_source={self.data_source}) is empty')
 
     def reader_check(self):
+        """
+        Checks that a given ticker/data_source can be called. If not, attempts same ticker with StooqDailyReader.
+        """
         try:
             if self.use_stooq_reader:
                 features = list(web.stooq.StooqDailyReader(self.ticker, self.start_date, self.end_date).read().columns)
@@ -63,6 +90,7 @@ class Stock:
                     f"Data could not be read for original data_source='{old_datasource}' nor backup data_source='stooq' for ticker '{self.ticker}'")
 
     def check_date(self, checked_date, date_type):
+        ''' Checks that given start/end data can be parsed as a date. '''
         try:
             checked_date = parse(str(checked_date), fuzzy=False).date()
         except ValueError:
@@ -70,6 +98,7 @@ class Stock:
         return checked_date
 
     def check_date_interval(self):
+        ''' Checks that given start/end data create time-interval. '''
         # if dates are the same or end date is before start date, raise an error
         if self.start_date == self.end_date:
             raise Exception("Stock attributes 'start_date' and 'end_date' cannot be the same.")
@@ -77,6 +106,7 @@ class Stock:
             raise Exception("Stock attribute 'end_date' must be a later date than attribute 'start_date'.")
 
     def try_check_date_interval(self):
+        ''' Wrapper, to catch when a date has not yet been initialized. '''
         try:
             self.check_date_interval()
         except AttributeError:
@@ -88,6 +118,7 @@ class Stock:
 
     @use_stooq_reader.setter
     def use_stooq_reader(self, use_stooq_reader):
+        """Setter that ensures use_stooq_reader is a bool. """
         if not isinstance(use_stooq_reader, bool):
             raise Exception("Keyword argument 'use_stooq_reader' must be a boolean.")
         self._use_stooq_reader = use_stooq_reader
@@ -106,6 +137,7 @@ class Stock:
 
     @features.setter
     def features(self, features):
+        """Setter that ensures that feature set of stock can be found in Stock dataframe. """
         self._features = self.reader_check()
         if not isinstance(features, (list, tuple)):
             features = [features]
@@ -121,6 +153,7 @@ class Stock:
 
     @ticker.setter
     def ticker(self, ticker):
+        """Setter that forces ticker to required uppercase, and checks that ticker exists for that datasource. """
         self._ticker = str(ticker).upper()
         try:
             self.reader_check()
@@ -134,6 +167,7 @@ class Stock:
 
     @data_source.setter
     def data_source(self, data_source):
+
         self._data_source = str(data_source).lower()
         if self.use_stooq_reader:
             if (data_source is not None) and (data_source != 'stooq'):
@@ -219,7 +253,7 @@ class StockCollection:
     class that defines a collection of stocks, with a defined primary stock, default stocks,
     and options to add more stocks or remove default stocks
     '''
-
+    # TODO add documentation for class/functions
     # TODO for target stock column, change from values to an additional column predicting rate of change
     def __init__(self, target):
 
