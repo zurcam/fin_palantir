@@ -287,9 +287,6 @@ class StockCollection:
     class that defines a collection of stocks, with a defined primary stock, default stocks,
     and options to add more stocks or remove default stocks
     '''
-    # TODO add documentation for class/functions
-    # TODO for target stock column, change from values to an additional column predicting rate of change
-    # TODO allow, on init, the selection of complete removal of additional diviniations
     def __init__(self, target):
 
         self.target = target
