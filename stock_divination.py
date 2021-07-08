@@ -64,9 +64,19 @@ class Stock:
 
     """
 
-    def __init__(self, alias, ticker, start_date, *, end_date=date.today(), data_source=None, use_stooq_reader=False):
-        # get use_stooq_reader
-        self.use_stooq_reader = use_stooq_reader
+    def __init__(self,
+                 alias,
+                 ticker,
+                 start_date,
+                 *,
+                 end_date=date.today(),
+                 data_source=None,
+                 save_dataframe=True,
+                 use_stooq_reader=False):
+
+        # ensure bool keyword arguments are bools, and init if yes
+        self.save_dataframe = self.bool_checker(('save_dataframe', save_dataframe))
+        self.use_stooq_reader = self.bool_checker(('use_stooq_reader', use_stooq_reader))
         # get dates
         self.start_date = self.check_date(start_date, 'start_date')
         self.end_date = self.check_date(end_date, 'end_date')
@@ -75,7 +85,8 @@ class Stock:
         self.alias = str(alias).upper()
         # uppercase provided ticker name
         self.ticker = str(ticker).upper()
-        # lowercase provided data source (eg "yahoo")
+        self._unfreeze = False
+        self.dataframe = None
         self.data_source = data_source
         self.features = self.reader_check()
 
@@ -88,12 +99,20 @@ class Stock:
         Checks that a given ticker/data_source can be called. If not, attempts same ticker with StooqDailyReader.
         """
         try:
+            # use either stooq_reader or standard reader depending on use_stooq_reader
             if self.use_stooq_reader:
-                features = list(web.stooq.StooqDailyReader(self.ticker, self.start_date, self.end_date).read().columns)
-                features.sort()
+                df = web.stooq.StooqDailyReader(self.ticker, self.start_date, self.end_date).read()
             else:
-                features = list(web.DataReader(self.ticker, self.data_source, self.start_date, self.end_date).columns)
-                features.sort()
+                df = web.DataReader(self.ticker, self.data_source, self.start_date, self.end_date)
+            # save features
+            features = list(df.columns)
+            features.sort()
+            # if save_dataframe is true, save dataframe to attribute
+            if self.save_dataframe:
+                self._unfreeze = True
+                self.dataframe = df
+                self._unfreeze = False
+            # return features
             return features
         except (web._utils.RemoteDataError, NotImplementedError):
             old_datasource = self.data_source
@@ -110,7 +129,7 @@ class Stock:
                     f"Data could not be read for original data_source='{old_datasource}' nor backup data_source='stooq' for ticker '{self.ticker}'")
 
     def check_date(self, checked_date, date_type):
-        ''' Checks that given start/end data can be parsed as a date. '''
+        """ Checks that given start/end data can be parsed as a date. """
         try:
             checked_date = parse(str(checked_date), fuzzy=False).date()
         except ValueError:
@@ -118,7 +137,7 @@ class Stock:
         return checked_date
 
     def check_date_interval(self):
-        ''' Checks that given start/end data create time-interval. '''
+        """ Checks that given start/end data create time-interval. """
         # if dates are the same or end date is before start date, raise an error
         if self.start_date == self.end_date:
             raise Exception("Stock attributes 'start_date' and 'end_date' cannot be the same.")
@@ -132,17 +151,16 @@ class Stock:
         except AttributeError:
             pass
 
-    @property
-    def use_stooq_reader(self):
-        return self._use_stooq_reader
+    def bool_checker(self, bool_tuple):
+        """
+        Function that checks bool types
 
-    @use_stooq_reader.setter
-    def use_stooq_reader(self, use_stooq_reader):
-        """Setter that ensures use_stooq_reader is a bool. """
-        if not isinstance(use_stooq_reader, bool):
-            raise Exception("Keyword argument 'use_stooq_reader' must be a boolean.")
-        self._use_stooq_reader = use_stooq_reader
+        :param bool_tuple:
 
+        """
+        if not isinstance(bool_tuple[1], bool):
+            raise Exception(f"Keyword argument '{bool_tuple[0]}' must be a boolean.")
+        return bool_tuple[1]
     @property
     def alias(self):
         return self._alias
@@ -234,20 +252,13 @@ class Stock:
 
     @property
     def dataframe(self):
-        """
-        Provides back a pandas_reader dataframe.
-        Dataframe is sorted on datetime index, and only includes columns (features) specified by user.
-        Upon init, features are all columns associated for the dataframe, but user may remove undesired features.
-        (e.g. stock_dataframe = Stock('walmart', 'wmt', '1/1/2000', data_source='yahoo).dataframe())
+        """Setter that prevents dataframe from being set outside of initial call"""
+        return self._dataframe
 
-        :returns dataframe
-        """
-        if self.use_stooq_reader:
-            df_stock = web.stooq.StooqDailyReader(self.ticker, self.start_date, self.end_date).read()
-        else:
-            df_stock = web.DataReader(self.ticker, self.data_source, self.start_date, self.end_date)
-        df_stock = df_stock[self.features]
-        return df_stock.sort_index()
+    @dataframe.setter
+    def dataframe(self, dataframe):
+        if self._unfreeze:
+            self._dataframe = dataframe
 
     def remove_features(self, feature_list):
         """
@@ -276,6 +287,21 @@ class Stock:
         # remove each feature requested
         for feature in feature_list:
             self.features.remove(feature)
+
+    def get_dataframe(self):
+        """
+        Provides back a pandas_reader dataframe, on demand.
+        Dataframe is sorted on datetime index, and only includes columns (features) specified by user.
+        Upon init, features are all columns associated for the dataframe, but user may remove undesired features.
+        (e.g. stock_dataframe = Stock('walmart', 'wmt', '1/1/2000', data_source='yahoo).dataframe())
+        :returns dataframe
+        """
+        if self.use_stooq_reader:
+            df_stock = web.stooq.StooqDailyReader(self.ticker, self.start_date, self.end_date).read()
+        else:
+            df_stock = web.DataReader(self.ticker, self.data_source, self.start_date, self.end_date)
+        df_stock = df_stock[self.features]
+        return df_stock.sort_index()
 
     def update_date(self, date_type, new_date):
         """
@@ -341,9 +367,9 @@ class StockCollection:
         elif default_divinations:
             # initialize default feature set
             self.divinations = [Stock('INFECT', 'INFECTDISEMVTRACKD', target[0].start_date, end_date=target[0].end_date,
-                                      use_stooq_reader=False, data_source='fred'),
+                                      data_source='fred'),
                                 Stock('STRESS', 'STLFSI2', target[0].start_date, end_date=target[0].end_date,
-                                      use_stooq_reader=False, data_source='fred'),
+                                      data_source='fred'),
                                 Stock('DOW_JONES_COMP', '^DJC', target[0].start_date, end_date=target[0].end_date,
                                       use_stooq_reader=True),
                                 Stock('NASDAQ_COMP', '^NDQ', target[0].start_date, end_date=target[0].end_date,
@@ -412,7 +438,10 @@ class StockCollection:
     def set_divinations_dataframes(self, *, set_target_only=False, feature_date_cyclical=True, feature_holiday=True,
                                    holiday_set=holidays.US()):
         # get just target dataframe
-        target_dataframe = self.target[0].dataframe
+        if self.target[0].dataframe is not None:
+            target_dataframe = self.target[0].dataframe
+        else:
+            target_dataframe = self.target[0].get_dataframe
         # add cyclical date features if requested, and holiday feature if requested
         target_dataframe = self.dataframe_date_featuring(target_dataframe, feature_date_cyclical, feature_holiday,
                                                          holiday_set)
@@ -427,7 +456,11 @@ class StockCollection:
         if not set_target_only:
             # merge target predicting columns, and other divination features on index
             for divination in self.divinations:
-                divination_dataframe = pd.merge(divination_dataframe, divination.dataframe, how='left',
+                if divination.dataframe is not None:
+                    df = divination.dataframe
+                else:
+                    df = divination.get_dataframe()
+                divination_dataframe = pd.merge(divination_dataframe, df, how='left',
                                                 left_index=True, right_index=True)
             self.target_dataframe, self.divination_dataframe = target_dataframe.fillna(-1), divination_dataframe.fillna(
                 -1)
@@ -645,9 +678,6 @@ class Optimization:
         return loss.item()
 
     def train(self, train_loader, val_loader, batch_size=64, n_epochs=50, n_features=1):
-        # TODO check folder, create if not exist, make sure no dupe
-        # model_path = f'C:/Users/cruzm/Documents/models/{self.model.__name__}_{datetime.now().strftime("%Y_%m_%d %H-%M-%S")}'*/
-
         for epoch in range(1, n_epochs + 1):
             batch_losses = []
             for x_batch, y_batch in train_loader:
@@ -674,8 +704,6 @@ class Optimization:
                 print(
                     f"[{epoch}/{n_epochs}] Training loss: {training_loss:.4f}\t Validation loss: {validation_loss:.4f}"
                 )
-
-        # torch.save(self.model.state_dict(), model_path)
 
     def evaluate(self, test_loader, batch_size=1, n_features=1):
         with torch.no_grad():
