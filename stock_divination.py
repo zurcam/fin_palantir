@@ -45,6 +45,23 @@ class Stock:
     :param use_stooq_reader
         bool, default False \n
         Boolean to force to use of StooqDailyReader if no data_source specified.
+
+    Attributes:
+        alias:
+            Equal to parameter alias
+        ticker:
+            Equal to parameter ticker
+        start_date:
+            Equal to parameter start_date
+        end_date:
+            Equal to parameter end_date
+        data_source:
+            Equal to parameter data_source
+        use_stooq_reader:
+            Equal to parameter use_stooq_reader
+        features:
+            A list of strings, columns names belonging to dataframe of Stock/dataset retrieved during pandas_datareader GET call
+
     """
 
     def __init__(self, alias, ticker, start_date, *, end_date=date.today(), data_source=None, use_stooq_reader=False):
@@ -283,25 +300,57 @@ class Stock:
 
 
 class StockCollection:
-    '''
-    class that defines a collection of stocks, with a defined primary stock, default stocks,
-    and options to add more stocks or remove default stocks
-    '''
-    def __init__(self, target):
+    """
+    Allows user to "collect" stocks, with a target Stock and target Stock feature (column),
+    and then a group of divination Stocks used as additional data to predict the Stock feature.
 
+    :param target
+        tuple \n
+        A tuple of (Stock, Stock.feature), in that order.
+        (e.g. (Stock('walmart', 'wmt', '1/1/2000', data_source='yahoo'), 'Close'))
+    :param default_divinations
+        bool \n
+        Boolean value, controlling if default divinations - a collection of FRED and index data - is added on init.
+
+    Attributes:
+        target:
+            Equal to target parameter
+        divinations:
+            list of Stock class \n
+            A list of other Stock classes, whose dataframes will be used as additional predicting data
+        target_dataframe:
+            dataframe \n
+            A dataframe constructed based off of target Stock pandas_reader dataframe,
+            extracting only the target column, then shifting all values up a datetime index
+            - to align all other current data with the "future" target info.
+        divination_dataframe:
+            dataframe \n
+            A dataframe constructed based off of all non-target column info in target Stock pandas_datareader dataframe,
+            as well as all other divination data.
+                - If pandas_datareader only has one column and there are not additional divinations, then the divination_dataframe will be comprised of only day/time featuring columns
+
+    """
+    def __init__(self, target, default_divinations=False):
+        # ensure start_divination is a bool.. If not, raise error
+        if not isinstance(default_divinations, bool):
+            raise Exception("Keyword argument 'default_divinations' must be a boolean.")
         self.target = target
-        # initialize default feature set
-        self.divinations = [Stock('INFECT', 'INFECTDISEMVTRACKD', target[0].start_date, end_date=target[0].end_date,
-                                  use_stooq_reader=False, data_source='fred'),
-                            Stock('STRESS', 'STLFSI2', target[0].start_date, end_date=target[0].end_date,
-                                  use_stooq_reader=False, data_source='fred'),
-                            Stock('DOW_JONES_COMP', '^DJC', target[0].start_date, end_date=target[0].end_date,
-                                  use_stooq_reader=True),
-                            Stock('NASDAQ_COMP', '^NDQ', target[0].start_date, end_date=target[0].end_date,
-                                  use_stooq_reader=True),
-                            Stock('SP_500', '^SPX', target[0].start_date, end_date=target[0].end_date,
-                                  use_stooq_reader=True)
-                            ]
+        # if start_divination=True, init default divinations
+        if not default_divinations:
+                self.divinations = []
+        elif default_divinations:
+            # initialize default feature set
+            self.divinations = [Stock('INFECT', 'INFECTDISEMVTRACKD', target[0].start_date, end_date=target[0].end_date,
+                                      use_stooq_reader=False, data_source='fred'),
+                                Stock('STRESS', 'STLFSI2', target[0].start_date, end_date=target[0].end_date,
+                                      use_stooq_reader=False, data_source='fred'),
+                                Stock('DOW_JONES_COMP', '^DJC', target[0].start_date, end_date=target[0].end_date,
+                                      use_stooq_reader=True),
+                                Stock('NASDAQ_COMP', '^NDQ', target[0].start_date, end_date=target[0].end_date,
+                                      use_stooq_reader=True),
+                                Stock('SP_500', '^SPX', target[0].start_date, end_date=target[0].end_date,
+                                      use_stooq_reader=True)
+                                ]
         # set target dataframe, divination dataframe to none then call function to set them
         self.target_dataframe = None
         self.divination_dataframe = None
