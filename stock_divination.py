@@ -5,6 +5,7 @@ import pandas_datareader as web
 import pandas as pd
 import numpy as np
 import warnings
+from stock_utils import ErrorChecker
 
 
 class Stock:
@@ -143,16 +144,6 @@ class Stock:
         except AttributeError:
             pass
 
-    def bool_checker(self, bool_tuple):
-        """
-        Function that checks bool types
-
-        :param bool_tuple:
-
-        """
-        if not isinstance(bool_tuple[1], bool):
-            raise Exception(f"Keyword argument '{bool_tuple[0]}' must be a boolean.")
-        return bool_tuple[1]
     @property
     def alias(self):
         return self._alias
@@ -167,7 +158,7 @@ class Stock:
 
     @save_dataframe.setter
     def save_dataframe(self, save_dataframe):
-        self._save_dataframe = self.bool_checker(('save_dataframe', save_dataframe))
+        self._save_dataframe = ErrorChecker(('save_dataframe', save_dataframe, 'Stock Class Attribute')).bool_checker()
 
     @property
     def use_stooq_reader(self):
@@ -175,7 +166,9 @@ class Stock:
 
     @use_stooq_reader.setter
     def use_stooq_reader(self, use_stooq_reader):
-        self._use_stooq_reader = self.bool_checker(('use_stooq_reader', use_stooq_reader))
+        self._use_stooq_reader = ErrorChecker(('use_stooq_reader',
+                                               use_stooq_reader,
+                                               'Stock Class Attribute')).bool_checker()
 
     @property
     def features(self):
@@ -218,7 +211,8 @@ class Stock:
         if self.use_stooq_reader:
             if (data_source is not None) and (data_source != 'stooq'):
                 warnings.warn(
-                    f"Attribute 'use_stooq_reader' is set to 'True', and does not require a passed value in keyword argument 'data_source'.")
+                    f"Attribute 'use_stooq_reader' is set to 'True', "
+                    f"and does not require a passed value in keyword argument 'data_source'.")
         try:
             self.reader_check()
             self.features = []
@@ -364,10 +358,15 @@ class StockCollection:
             dataframe \n
             A dataframe constructed based off of all non-target column info in target Stock pandas_datareader dataframe,
             as well as all other divination data.
-                - If pandas_datareader only has one column and there are not additional divinations, then the divination_dataframe will be comprised of only day/time featuring columns
+                - If pandas_datareader only has one column and there are not additional divinations,
+                then the divination_dataframe will be comprised of only day/time featuring columns
 
     """
-    def __init__(self, target, default_divinations=False):
+    def __init__(self, target, default_divinations=False, target_rate_of_change=False, go_backwards=0):
+        # ensure target_rate_of_change is a boolean
+        self.target_rate_of_change = target_rate_of_change
+        # ensure that go_backwards is an integer
+        self.go_backwards = go_backwards
         # ensure start_divination is a bool.. If not, raise error
         if not isinstance(default_divinations, bool):
             raise Exception("Keyword argument 'default_divinations' must be a boolean.")
@@ -394,6 +393,27 @@ class StockCollection:
         self.set_divinations_dataframes()
 
     @property
+    def go_backwards(self):
+        return self._go_backwards
+
+    @go_backwards.setter
+    def go_backwards(self, go_backwards):
+        go_backwards = abs(ErrorChecker(('go_backwards', go_backwards, 'Stock Class attribute')).int_checker())
+        if go_backwards > 30:
+            raise Exception(f"Developer doesn't want you going farther back than 30 days. Patch if you want to.")
+        self._go_backwards = go_backwards
+
+    @property
+    def target_rate_of_change(self):
+        return self._target_rate_of_change
+
+    @target_rate_of_change.setter
+    def target_rate_of_change(self, target_rate_of_change):
+        self._target_rate_of_change = ErrorChecker(('target_rate_of_change',
+                                                    target_rate_of_change,
+                                                    'Stock Class attribute')).bool_checker()
+
+    @property
     def target(self):
         return self._target
 
@@ -405,11 +425,13 @@ class StockCollection:
         # check that target is a tuple
         if not isinstance(target, tuple):
             raise Exception(
-                f"'target' must be a tuple of length = 2, where the first index is the target stock, and the second index is the name of the target column within the target stock.")
+                f"'target' must be a tuple of length = 2, where the first index is the target stock, "
+                f"and the second index is the name of the target column within the target stock.")
         # check that target (first index of tuple) is a Stock class
         if not isinstance(target[0], Stock):
             raise Exception(f"First index of 'target' argument must by a class Stock object.")
-        # check that the target feature (second index of tuple) is a string that is a column name within the features of the target Stock
+        # check that the target feature (second index of tuple) is a string that is a column name
+        # within the features of the target Stock
         if target[1] not in target[0].features:
             raise Exception(
                 f"Value in second index of target tuple not in feature set of first index (the target stock).")
@@ -438,7 +460,8 @@ class StockCollection:
             # if divination already in divinations, then raise error
             if divination in self.divinations:
                 raise Exception(
-                    f"Stock(ticker='{divination.ticker}, data_source={divination.data_source} in 'divination_list' already in self.divinations.")
+                    f"Stock(ticker='{divination.ticker}, data_source={divination.data_source} "
+                    f"in 'divination_list' already in self.divinations.")
         # if all items are stocks, and not in self.divinations, then add to divinations
         for divination in divination_list:
             # have stock start, end dates mimic target[0]
@@ -458,12 +481,42 @@ class StockCollection:
                                                          holiday_set)
         # Split the dataframe between the target column and other predicting variables
         divination_dataframe, target_dataframe = target_dataframe.loc[:,
-                                                 target_dataframe.columns != self.target[1]], target_dataframe.filter(
-            items=[self.target[1]])
-        # for the target column dataframe, shift all rows up one (want metrics to predict tomorrows target column)
-        target_dataframe = target_dataframe.shift(-1)
-        # for the target column dataframe, assign last row to be equal to previous row (just to make sure values are in there)
-        target_dataframe.iloc[-1] = target_dataframe.iloc[-2].values
+                                                target_dataframe.columns != self.target[1]], \
+                                                target_dataframe.filter(items=[self.target[1]])
+        # if the user wants to attempt to have current data line up with some future value
+        # e.g. if the user wanted today's stock data to line up with tomorrow's target data, then go_backwards = 1
+        if self.go_backwards > 0:
+            # for the target column dataframe, shift all rows up one (want metrics to predict tomorrows target column)
+            target_dataframe = target_dataframe.shift(-self.go_backwards)
+            # for the target column dataframe, assign last rows to be equal to previous row
+            # (just to make sure values are in there)
+            for i in range(self.go_backwards, 0, -1):
+                target_dataframe.iloc[-i] = target_dataframe.iloc[-(self.go_backwards + 1)].values
+
+        # if the user wants to predict not the day, but the rate of change between the dates
+        # e.g. will this stock increase (1) or decrease (0) tomorrow?
+        if self.target_rate_of_change:
+            past_day_list = target_dataframe[target_dataframe.columns[0]].to_list()[:-1]
+            next_day_list = target_dataframe[target_dataframe.columns[0]].to_list()[1:]
+            encoded_rate_of_change_list = []
+            # calculate rate of changes, and encode
+            for i, day in enumerate(past_day_list):
+                rate_of_change = next_day_list[i] - past_day_list[i]
+                if rate_of_change > 0:
+                    encoded_roc = 1
+                elif rate_of_change == 0:
+                    encoded_roc = 0
+                elif rate_of_change < 0:
+                    encoded_roc = -1
+                encoded_rate_of_change_list.append(encoded_roc)
+            # add one more item to list, to match length of original list. Make it 0, see if prediction differs
+            encoded_rate_of_change_list.append(0)
+            original_target_column_name = target_dataframe.columns[0]
+            # add rate if change list
+            target_dataframe[f'{original_target_column_name}_RATE_OF_CHANGE'] = np.asarray(encoded_rate_of_change_list)
+            # delete old target column
+            del target_dataframe[original_target_column_name]
+
         if not set_target_only:
             # merge target predicting columns, and other divination features on index
             for divination in self.divinations:
