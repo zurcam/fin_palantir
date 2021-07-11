@@ -4,7 +4,7 @@ class ErrorChecker:
     Class that allows isinstance checks, with additional flavor text for Exception messages
 
     :param check_tuple:
-        tuple, length=3
+        tuple, length=3 \n
         First index is the name of the object, the second index is the object, and the third index is
         additional flavor text used to create message
         (E.g. check_tuple = ('my_bool', my_bool, 'Keyword argument') -> "Keyword argmument 'my_bool' not of type bool)
@@ -29,7 +29,7 @@ class ErrorChecker:
         self._check_tuple = check_tuple
 
     def _generic_checker(self, string_type, var_type):
-        # check if the supposed objecy is truly it's type, if not raise exception
+        # check if the supposed object is truly it's type, if not raise exception
         if not isinstance(self.check_tuple[1], var_type):
             raise Exception(f"{self.check_tuple[2]} '{self.check_tuple[0]}' must be a {string_type}.")
         # if the supposed object is actually the object, then return it :)
