@@ -5,7 +5,10 @@ import pandas_datareader as web
 import pandas as pd
 import numpy as np
 import warnings
+
+import stock_utils
 from stock_utils import ErrorChecker
+import matplotlib.pyplot as plt
 
 
 class Stock:
@@ -329,6 +332,17 @@ class Stock:
         elif date_type == 'end':
             self.end_date = new_date
 
+    def plot_dataframe(self):
+        """
+        Class method that shows plot for Stock self.dataframe attribute
+        """
+        # check if dataframe has been pulled. If not, pull and save it to attribute
+        if self.dataframe is None:
+            self._unfreeze = True
+            self.dataframe = self.get_dataframe()
+            self._unfreeze = False
+        # call stock_utils plot_datetime_dataframe
+        stock_utils.plot_datetime_dataframe(self.dataframe, plot_title='Stock Dataframe')
 
 class StockCollection:
     """
@@ -342,10 +356,22 @@ class StockCollection:
     :param default_divinations
         bool \n
         Boolean value, controlling if default divinations - a collection of FRED and index data - is added on init.
-
+        (e.g. default_divinations=True)
+    :param target_rate_of_change:
+        bool \n
+        Boolean, allowing user to switch from a target dataframe column values, to its daily rate of change.
+        (e.g. target_rate_of_change = True)
+    :param go_backwards:
+        int \n
+        Allows user to shift a target dataframes values upwards on the same datetime index, by [go_backwards] amount.
+        (e.g. go_backwards = 2)
     Attributes:
         target:
             Equal to target parameter
+        target_rate_of_change:
+            Equal to target_rate_of_change parameter
+        go_backwards:
+            Equal to go_backwards parameter
         divinations:
             list of Stock class \n
             A list of other Stock classes, whose dataframes will be used as additional predicting data
@@ -422,6 +448,8 @@ class StockCollection:
         self._target = self.check_target(target)
 
     def check_target(self, target):
+        """Back end function that checks for a given stock, and its target column, the stock and column are accessible
+        through a pandas_datareader call."""
         # check that target is a tuple
         if not isinstance(target, tuple):
             raise Exception(
@@ -445,6 +473,15 @@ class StockCollection:
         return target
 
     def add_divinations(self, divination_list):
+        """
+        Class method that allows a user to add 'divinations' - i.e. other Stock Class instances - to the StockCollection.
+
+        :param divination_list:
+            list, Stock \n
+            Single, or list of initialized Stock instances to be added to the StockCollection instance.
+            (e.g. my_stock_collection.add_divinations(Stock('walmart', 'wmt', '1/1/2000'))
+
+        """
         # check if divination_list is a list or tuple, make it a list
         if not isinstance(divination_list, (list, tuple)):
             divination_list = [divination_list]
@@ -471,6 +508,25 @@ class StockCollection:
 
     def set_divinations_dataframes(self, *, set_target_only=False, feature_date_cyclical=True, feature_holiday=True,
                                    holiday_set=holidays.US()):
+        """
+        Class method that, for a StockCollection instance, sets the attributes target_dataframe and divination_dataframe.
+
+        :param set_target_only:
+            bool \n
+            If True, then only the target_dataframe will be set
+        :param feature_date_cyclical:
+            bool \n
+            If True, will add cyclical date features, where a given time is converted to a value on the unit circle,
+            based on the given interval.
+        :param feature_holiday:
+            bool \n
+            If True, then holiday feature column will be added
+            - where holidays are based on argument passed to holiday_set parameter
+        :param holiday_set:
+            holidays, default=holidays.US() n\
+            An instance from the holiday library, representing a geograpical set of holidays.
+
+        """
         # get just target dataframe
         if self.target[0].dataframe is not None:
             target_dataframe = self.target[0].dataframe
@@ -520,10 +576,13 @@ class StockCollection:
         if not set_target_only:
             # merge target predicting columns, and other divination features on index
             for divination in self.divinations:
-                if divination.dataframe is not None:
-                    df = divination.dataframe
-                else:
+                if divination.dataframe is None:
                     df = divination.get_dataframe()
+                else:
+                    df = divination.dataframe
+                # rename each dataframe column appending _ticker
+                df.columns = [f"{column}_{divination.ticker}" for column in df.columns]
+                # merge new divination_dataframe into old one
                 divination_dataframe = pd.merge(divination_dataframe, df, how='left',
                                                 left_index=True, right_index=True)
             self.target_dataframe, self.divination_dataframe = target_dataframe.fillna(-1), divination_dataframe.fillna(
@@ -532,6 +591,16 @@ class StockCollection:
             self.target_dataframe = target_dataframe.fillna(-1)
 
     def remove_divinations(self, alias_list):
+        """
+        Class method that, for a single alias string or list of alias strings, deletes those Stocks what have that
+        alias from self.divinations
+
+        :param alias_list:
+            str, list \n
+            The single stirng, or list of aliases to be removed. Method will look at each Stock instance saved in
+            self.divinations attribute, and if alias is equal to the divinations Stock instance, removes that Stock.
+
+        """
         # check if alias_list is a list or tuple
         if not isinstance(alias_list, (list, tuple)):
             alias_list = [alias_list]
@@ -550,6 +619,12 @@ class StockCollection:
                 self.divinations.remove(divination)
 
     def show_divinations(self):
+        """
+        Class method that prints off each Stock instance in self.divinations attribute.
+
+        :return: divination text:
+            formatted text for each Stock instance present in self.divinations.
+        """
         for i, divination in enumerate(self.divinations):
             if i == 0:
                 print('_' * 100)
@@ -559,6 +634,27 @@ class StockCollection:
 
     def dataframe_date_featuring(self, dataframe, feature_date_cyclical=True, feature_holiday=True,
                                  holiday_set=holidays.US()):
+        """
+        Class function that takes in a given dataframe, and returns the dataframe with additional date-related
+        feature columns.
+
+        :param dataframe:
+            dataframe \n
+            The dataframe that will have additional features added to it.
+        :param feature_date_cyclical:
+            bool \n
+            If True, then adds cyclical feature dates. See StockCollection.set_divinations_dataframe() documentation
+            for more information.
+        :param feature_holiday:
+            bool \n
+            If True, adds a holiday feature set.  See StockCollection.set_divinations_dataframe() documentation
+            for more information.
+        :param holiday_set:
+            holidays, default=holidays.US() n\
+            An instance from the holiday library, representing a geograpical set of holidays.
+        :return: featured dataframe:
+            The dataframe passed in, with the additional date related feature columns added to it.
+        """
 
         # function that determines if a given date is a holiday
         def is_holiday(date):
@@ -601,6 +697,20 @@ class StockCollection:
             dataframe = add_holiday_col(dataframe)
 
         return dataframe
+
+    def plot_target_dataframe(self):
+        """
+        Class method that shows plot of StockCollection.target_dataframe attribute.
+        """
+        # call stock_utils plot_datetime_dataframe
+        stock_utils.plot_datetime_dataframe(self.target_dataframe, plot_title='Target Dataframe')
+
+    def plot_divination_dataframe(self):
+        """
+        Class method that shows plot of StockCollection.target_dataframe attribute.
+        """
+        # call stock_utils plot_datetime_dataframe
+        stock_utils.plot_datetime_dataframe(self.divination_dataframe, plot_title='Divination Dataframe')
 
     def __str__(self):
         return str(self.__class__) + ": " + str(self.__dict__)
