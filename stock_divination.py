@@ -1,14 +1,12 @@
+import pandas as pd
 from dateutil.parser import parse
 from datetime import datetime, date
 import holidays
 import pandas_datareader as web
-import pandas as pd
 import numpy as np
 import warnings
-
 import stock_utils
 from stock_utils import ErrorChecker
-import matplotlib.pyplot as plt
 
 
 class Stock:
@@ -38,6 +36,9 @@ class Stock:
         or an acceptepted pandas_datareader data_source string. If none specificed, or if data_source fails, defaults
         to 'stooq' dailyreader
         (e.g. 'yahoo', 'fred')
+    :param dataframe_as_stock:
+        pandas dataframe n\
+        If, instead of wanting to use pandas_datereader, user can pass in a dataframe as the stock data.
     :param use_stooq_reader
         bool, default False \n
         Boolean to force to use of StooqDailyReader if no data_source specified.
@@ -53,6 +54,8 @@ class Stock:
             Equal to parameter end_date
         data_source:
             Equal to parameter data_source
+        dataframe_as_stock:
+            Equal to parameter dataframe_as_stock
         use_stooq_reader:
             Equal to parameter use_stooq_reader
         features:
@@ -67,6 +70,7 @@ class Stock:
                  *,
                  end_date=date.today(),
                  data_source=None,
+                 dataframe_as_stock=None,
                  save_dataframe=True,
                  use_stooq_reader=False):
 
@@ -81,10 +85,18 @@ class Stock:
         self.alias = str(alias).upper()
         # uppercase provided ticker name
         self.ticker = str(ticker).upper()
-        self._unfreeze = False
-        self.dataframe = None
-        self.data_source = data_source
-        self.features = self.reader_check()
+        # if the Stock will be created from a dataframe
+        if dataframe_as_stock is not None:
+            self._no_reader = True
+            self._unfreeze = True
+            self.dataframe = dataframe_as_stock
+            self._unfreeze = False
+        else:
+            self._no_reader = False
+            self._unfreeze = False
+            self.dataframe = None
+            self.data_source = data_source
+            self.features = self.reader_check()
 
         # if there are no features, raise an error
         if len(self.features) == 0:
@@ -180,7 +192,10 @@ class Stock:
     @features.setter
     def features(self, features):
         """Setter that ensures that feature set of stock can be found in Stock dataframe. """
-        self._features = self.reader_check()
+        if not self._no_reader:
+            self._features = self.reader_check()
+        else:
+            self._features = features
         if not isinstance(features, (list, tuple)):
             features = [features]
         if len(features) > 0 and set(features).issubset(set(self._features)):
@@ -198,7 +213,8 @@ class Stock:
         """Setter that forces ticker to required uppercase, and checks that ticker exists for that datasource. """
         self._ticker = str(ticker).upper()
         try:
-            self.reader_check()
+            if not self._no_reader:
+                self.reader_check()
             self.features = []
         except AttributeError:
             pass
@@ -217,7 +233,8 @@ class Stock:
                     f"Attribute 'use_stooq_reader' is set to 'True', "
                     f"and does not require a passed value in keyword argument 'data_source'.")
         try:
-            self.reader_check()
+            if not self._no_reader:
+                self.reader_check()
             self.features = []
         except AttributeError:
             pass
@@ -249,8 +266,12 @@ class Stock:
         # ensure comparison stock is a Stock class, if not return False
         if not isinstance(other_stock, Stock):
             return False
-        # a stock is "equal" to another if it's ticker, data source, and features are the same
-        return (self.ticker == other_stock.ticker) and (self.data_source == other_stock.data_source)
+        # check if dataframes can be equal. if so, good
+        if self.dataframe.equals(other_stock.dataframe):
+            return True
+        # a stock is "equal" to another if it's ticker, data source, dates, and features are the same
+        return (self.ticker == other_stock.ticker) and (self.data_source == other_stock.data_source) and \
+               (self.start_date == other_stock.end_date) and (self.end_date == other_stock.end_date)
 
     def __hash__(self):
         return (hash(repr(self)))
@@ -265,8 +286,26 @@ class Stock:
 
     @dataframe.setter
     def dataframe(self, dataframe):
-        if self._unfreeze:
-            self._dataframe = dataframe
+        # if no pandas reader, but rather a dataframe
+        if self._no_reader:
+            if self._unfreeze:
+                # check to ensure it can be a dataframe
+                dataframe = ErrorChecker(('dataframe_as_stock', dataframe, 'Keyword argument')).dataframe_checker()
+                dataframe[dataframe.columns[0]] = pd.to_datetime(dataframe[dataframe.columns[0]])
+                dataframe.set_index(dataframe.columns[0], inplace=True)
+                dataframe.sort_index()
+                # filter by dates
+                dataframe = dataframe.loc[(dataframe.index >= pd.Timestamp(self.start_date)) &
+                                          (dataframe.index <= pd.Timestamp(self.end_date))]
+                # set attributes
+                self._dataframe = dataframe
+                self.data_source = 'local'
+                self.features = list(dataframe.columns)
+        try:
+            if self._unfreeze:
+                self._dataframe = dataframe
+        except AttributeError:
+            pass
 
     def remove_features(self, feature_list):
         """
@@ -332,6 +371,36 @@ class Stock:
         elif date_type == 'end':
             self.end_date = new_date
 
+    def add_columns(self, method, apply_method_to, *args, **kwargs):
+        """
+        Function that will add on dataframe columns, using methods defined in stock_utils.
+
+        :param method:
+            str n\
+            The method, as defined in stock_utils.
+        :param apply_method_to:
+            str, list n\
+            The columns whose data the requested method will be applied to.
+        :param args:
+            Any additional required positional arguments for the method.
+        :param kwargs:
+            And additional keyword arguments for the method.
+        :return:
+            dataframe n\
+            The original dataframe, with additional columns added reflecting the method.
+
+        """
+        method = str(method).lower()
+        # check that requested method is actually available
+        if method not in stock_utils.dataframe_additions.method_list:
+            raise Exception(f"Argument '{method}' passed into positional argument 'method' not in current accepted "
+                            f"method list. "
+                            f"Current available methods are: {stock_utils.dataframe_additions.method_list}.")
+        # add requested columns to dataframe
+        self._unfreeze = True
+        self.dataframe = stock_utils.dataframe_additions(self.dataframe, method, apply_method_to, *args, **kwargs)
+        self._unfreeze = False
+
     def plot_dataframe(self):
         """
         Class method that shows plot for Stock self.dataframe attribute
@@ -357,10 +426,7 @@ class StockCollection:
         bool \n
         Boolean value, controlling if default divinations - a collection of FRED and index data - is added on init.
         (e.g. default_divinations=True)
-    :param target_rate_of_change:
-        bool \n
-        Boolean, allowing user to switch from a target dataframe column values, to its daily rate of change.
-        (e.g. target_rate_of_change = True)
+
     :param go_backwards:
         int \n
         Allows user to shift a target dataframes values upwards on the same datetime index, by [go_backwards] amount.
@@ -368,8 +434,6 @@ class StockCollection:
     Attributes:
         target:
             Equal to target parameter
-        target_rate_of_change:
-            Equal to target_rate_of_change parameter
         go_backwards:
             Equal to go_backwards parameter
         divinations:
@@ -388,9 +452,7 @@ class StockCollection:
                 then the divination_dataframe will be comprised of only day/time featuring columns
 
     """
-    def __init__(self, target, default_divinations=False, target_rate_of_change=False, go_backwards=0):
-        # ensure target_rate_of_change is a boolean
-        self.target_rate_of_change = target_rate_of_change
+    def __init__(self, target, default_divinations=False, go_backwards=0):
         # ensure that go_backwards is an integer
         self.go_backwards = go_backwards
         # ensure start_divination is a bool.. If not, raise error
@@ -428,16 +490,6 @@ class StockCollection:
         if go_backwards > 30:
             raise Exception(f"Developer doesn't want you going farther back than 30 days. Patch if you want to.")
         self._go_backwards = go_backwards
-
-    @property
-    def target_rate_of_change(self):
-        return self._target_rate_of_change
-
-    @target_rate_of_change.setter
-    def target_rate_of_change(self, target_rate_of_change):
-        self._target_rate_of_change = ErrorChecker(('target_rate_of_change',
-                                                    target_rate_of_change,
-                                                    'Stock Class attribute')).bool_checker()
 
     @property
     def target(self):
@@ -548,30 +600,6 @@ class StockCollection:
             # (just to make sure values are in there)
             for i in range(self.go_backwards, 0, -1):
                 target_dataframe.iloc[-i] = target_dataframe.iloc[-(self.go_backwards + 1)].values
-
-        # if the user wants to predict not the day, but the rate of change between the dates
-        # e.g. will this stock increase (1) or decrease (0) tomorrow?
-        if self.target_rate_of_change:
-            past_day_list = target_dataframe[target_dataframe.columns[0]].to_list()[:-1]
-            next_day_list = target_dataframe[target_dataframe.columns[0]].to_list()[1:]
-            encoded_rate_of_change_list = []
-            # calculate rate of changes, and encode
-            for i, day in enumerate(past_day_list):
-                rate_of_change = next_day_list[i] - past_day_list[i]
-                if rate_of_change > 0:
-                    encoded_roc = 1
-                elif rate_of_change == 0:
-                    encoded_roc = 0
-                elif rate_of_change < 0:
-                    encoded_roc = -1
-                encoded_rate_of_change_list.append(encoded_roc)
-            # add one more item to list, to match length of original list. Make it 0, see if prediction differs
-            encoded_rate_of_change_list.append(0)
-            original_target_column_name = target_dataframe.columns[0]
-            # add rate if change list
-            target_dataframe[f'{original_target_column_name}_RATE_OF_CHANGE'] = np.asarray(encoded_rate_of_change_list)
-            # delete old target column
-            del target_dataframe[original_target_column_name]
 
         if not set_target_only:
             # merge target predicting columns, and other divination features on index
@@ -716,4 +744,4 @@ class StockCollection:
         return str(self.__class__) + ": " + str(self.__dict__)
 
     def __hash__(self):
-        return (hash(repr(self)))
+        return hash(repr(self))
