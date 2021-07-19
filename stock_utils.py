@@ -121,11 +121,24 @@ def dataframe_additions(dataframe, method, apply_method_to, *args, **kwargs):
     # ifs for different methods
     if method == 'rolling_average':
         # rolling average dataframe
-        new_dataframe = dataframe.rolling(*args, **kwargs).mean()[apply_method_to]
+        new_dataframe = dataframe[apply_method_to].rolling(*args, **kwargs).mean()
     if method == 'rate_of_change':
         new_dataframe = dataframe[apply_method_to].diff(*args, **kwargs)
-    # re-label new columns to capture method
-    new_dataframe.columns = [f"{column}_{method}" for column in apply_method_to]
+    if method == 'shift':
+        # for the target column dataframe, shift all rows up/down
+        new_dataframe = dataframe[apply_method_to].shift(*args, **kwargs)
+
+    if not isinstance(dataframe.index, pd.MultiIndex):
+        # re-label new columns to capture method
+        new_dataframe.columns = [f"{column}_{method}" for column in apply_method_to]
+    else:
+        new_columns = []
+        for multi_index_column in apply_method_to:
+            if len(multi_index_column) > 1:
+                new_columns.append((f"{multi_index_column[0]}_{method}", *multi_index_column[1:]))
+            else:
+                new_columns.append((f"{multi_index_column[0]}_{method}"))
+        new_dataframe.columns = new_columns
     # add new dataframe to existing one
     dataframe = pd.merge(dataframe, new_dataframe, how='left', left_index=True,
                          right_index=True)
