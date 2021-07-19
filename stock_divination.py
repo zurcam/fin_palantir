@@ -19,9 +19,9 @@ class Stock:
         (e.g. 'WALMART' or 'INFECT').
 
     :param ticker
-        str \n
+        str, list \n
         Stock/data-set ticker. The recognized official ticker for a stock/data-set
-        (e.g. 'WMT', 'INFECTDISEMVTRACKD').
+        (e.g. 'WMT', 'INFECTDISEMVTRACKD', ['WMT', 'INFECTDISEMVTRACKD']).
     :param start_date
         str, date, datetime, Timestamp \n
         Start date. If string, will attempt to parse into datetime object
@@ -33,7 +33,7 @@ class Stock:
     :param data_source
         str, pandas_reader data_source/api call, default None \n
         The data_source for the stock/data-set. Can be an accepted pandas_datareader API call,
-        or an acceptepted pandas_datareader data_source string. If none specificed, or if data_source fails, defaults
+        or an acceptepted pandas_datareader data_source string. If none specified, or if data_source fails, defaults
         to 'stooq' dailyreader
         (e.g. 'yahoo', 'fred')
     :param dataframe_as_stock:
@@ -84,7 +84,7 @@ class Stock:
         # Upper case alias
         self.alias = str(alias).upper()
         # uppercase provided ticker name
-        self.ticker = str(ticker).upper()
+        self.ticker = ticker
         # if the Stock will be created from a dataframe
         if dataframe_as_stock is not None:
             self._no_reader = True
@@ -211,7 +211,10 @@ class Stock:
     @ticker.setter
     def ticker(self, ticker):
         """Setter that forces ticker to required uppercase, and checks that ticker exists for that datasource. """
-        self._ticker = str(ticker).upper()
+        if isinstance(ticker, list):
+            self._ticker = [str(ticker_item).upper() for ticker_item in ticker]
+        else:
+            self._ticker = str(ticker).upper()
         try:
             if not self._no_reader:
                 self.reader_check()
@@ -452,9 +455,7 @@ class StockCollection:
                 then the divination_dataframe will be comprised of only day/time featuring columns
 
     """
-    def __init__(self, target, default_divinations=False, go_backwards=0):
-        # ensure that go_backwards is an integer
-        self.go_backwards = go_backwards
+    def __init__(self, target, default_divinations=False):
         # ensure start_divination is a bool.. If not, raise error
         if not isinstance(default_divinations, bool):
             raise Exception("Keyword argument 'default_divinations' must be a boolean.")
@@ -479,17 +480,6 @@ class StockCollection:
         self.target_dataframe = None
         self.divination_dataframe = None
         self.set_divinations_dataframes()
-
-    @property
-    def go_backwards(self):
-        return self._go_backwards
-
-    @go_backwards.setter
-    def go_backwards(self, go_backwards):
-        go_backwards = abs(ErrorChecker(('go_backwards', go_backwards, 'Stock Class attribute')).int_checker())
-        if go_backwards > 30:
-            raise Exception(f"Developer doesn't want you going farther back than 30 days. Patch if you want to.")
-        self._go_backwards = go_backwards
 
     @property
     def target(self):
@@ -591,15 +581,6 @@ class StockCollection:
         divination_dataframe, target_dataframe = target_dataframe.loc[:,
                                                 target_dataframe.columns != self.target[1]], \
                                                 target_dataframe.filter(items=[self.target[1]])
-        # if the user wants to attempt to have current data line up with some future value
-        # e.g. if the user wanted today's stock data to line up with tomorrow's target data, then go_backwards = 1
-        if self.go_backwards > 0:
-            # for the target column dataframe, shift all rows up one (want metrics to predict tomorrows target column)
-            target_dataframe = target_dataframe.shift(-self.go_backwards)
-            # for the target column dataframe, assign last rows to be equal to previous row
-            # (just to make sure values are in there)
-            for i in range(self.go_backwards, 0, -1):
-                target_dataframe.iloc[-i] = target_dataframe.iloc[-(self.go_backwards + 1)].values
 
         if not set_target_only:
             # merge target predicting columns, and other divination features on index
